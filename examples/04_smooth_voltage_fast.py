@@ -8,7 +8,7 @@ from feetech_hls_rpi import HLSMotor
 
 PRINT_INTERVAL = 0.5
 
-with HLSMotor(servo_id=1, baudrate=38_400, voltage_filter_alpha=0.05) as motor:
+with HLSMotor(servo_id=1, baudrate=38_400, voltage_filter_alpha=0.05, stop_on_close=False) as motor:
     last_print = time.monotonic()
     samples = 0
     samples_at_print = 0

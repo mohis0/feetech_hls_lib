@@ -8,9 +8,7 @@ with HLSMotor(
     servo_id=1,
     port="/dev/ttyAMA0",
     baudrate=38_400,
-    mux_gpio=23,
-    tx_connected_level=1,
-    tx_disconnected_level=0,
+    stop_on_close=False,
 ) as motor:
     print("Model number:", motor.ping())
     print(motor.read_info())

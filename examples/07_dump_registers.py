@@ -4,7 +4,7 @@
 from feetech_hls_rpi import HLSMotor
 
 
-with HLSMotor(servo_id=1, baudrate=38_400) as motor:
+with HLSMotor(servo_id=1, baudrate=38_400, stop_on_close=False) as motor:
     snapshot = motor.dump_registers(skip_errors=True)
     for name, item in snapshot.values.items():
         unit = f" {item.unit}" if item.unit else ""

@@ -661,3 +661,7 @@ The tests include the observed boundary transitions:
 - Protocol packet handler: https://raw.githubusercontent.com/vassar-robotics/feetech-servo-sdk/main/scservo_sdk/protocol_packet_handler.py
 - Official magnetic-encoder protocol manual: https://www.feetechrc.com/Data/feetechrc/upload/file/20240702/%E8%88%B5%E6%9C%BA%E5%8D%8F%E8%AE%AE%E6%89%8B%E5%86%8C-%E7%A3%81%E7%BC%96%E7%A0%81%E7%89%88%E6%9C%AC.pdf
 - HL-3915-C001 product page/specification: https://www.feetechrc.com/563788.html
+
+## Find an unknown servo
+
+Run `python examples/09_scan_bus.py` to ping IDs 0–253 at every supported baud rate. This can take over a minute because unanswered IDs time out. Use `--start-id`, `--end-id`, `--baud`, and `--port` to narrow the scan; `--help` shows the options. The scan sends unicast pings and does not change settings or send stop commands. Motors sharing an ID and baud can cause reply collisions.

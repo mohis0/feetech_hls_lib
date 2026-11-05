@@ -6,7 +6,7 @@ import time
 from feetech_hls_rpi import HLSMotor
 
 
-with HLSMotor(servo_id=1, baudrate=38_400) as motor:
+with HLSMotor(servo_id=1, baudrate=38_400, stop_on_close=False) as motor:
     motor.reset_incremental_encoder()
 
     try:

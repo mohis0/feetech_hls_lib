@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Move the HLS3950M between three single-turn positions."""
+"""Move the HL-3915-C001 between three single-turn positions."""
 
 import time
 
