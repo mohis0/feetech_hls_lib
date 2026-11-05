@@ -40,17 +40,12 @@ RATE_TO_BAUD_CODE: Dict[int, int] = {rate: code for code, rate in BAUD_CODE_TO_R
 
 
 class OperatingMode(IntEnum):
-    """HLS operating modes.
-
-    ``STEP`` is present in the common magnetic-encoder control table but may
-    be firmware/model dependent.  HLS3950M users normally use POSITION,
-    SPEED, and TORQUE.
-    """
+    """Operating modes from the HLS family memory table."""
 
     POSITION = 0
     SPEED = 1
     TORQUE = 2
-    STEP = 3
+    PWM = 3
 
 
 class ResponseLevel(IntEnum):
@@ -68,7 +63,6 @@ class StatusFlag(IntFlag):
     ANGLE_SENSOR = 1 << 1
     OVERHEAT = 1 << 2
     OVERCURRENT = 1 << 3
-    OVERLOAD = 1 << 5
 
 
 class Register(IntEnum):
@@ -79,7 +73,7 @@ class Register(IntEnum):
     MODEL_NUMBER = 3
     ID = 5
     BAUD_RATE = 6
-    RETURN_DELAY = 7
+    SECONDARY_ID = 7
     RESPONSE_LEVEL = 8
     MIN_ANGLE_LIMIT = 9
     MAX_ANGLE_LIMIT = 11
@@ -101,9 +95,8 @@ class Register(IntEnum):
     ANGULAR_RESOLUTION = 30
     POSITION_OFFSET = 31
     MODE = 33
-    PROTECTION_TORQUE = 34
-    PROTECTION_TIME = 35
-    OVERLOAD_TORQUE = 36
+    CURRENT_P = 34
+    CURRENT_I = 35
     SPEED_P = 37
     OVERCURRENT_TIME = 38
     SPEED_I = 39
@@ -149,7 +142,7 @@ REGISTER_SPECS: Dict[str, RegisterSpec] = {
     "model_number": RegisterSpec(3, 2, True, False, True, None, 1.0, "Servo model number"),
     "id": RegisterSpec(5, 1, True, True, True, None, 1.0, "Bus ID, valid range 0..253"),
     "baud_rate": RegisterSpec(6, 1, True, True, True, "baud code", 1.0, "Baud-rate code 0..7"),
-    "return_delay": RegisterSpec(7, 1, True, True, True, "2 us", 2.0, "Response delay", True),
+    "secondary_id": RegisterSpec(7, 1, True, True, True, None, 1.0, "Secondary ID", True),
     "response_level": RegisterSpec(8, 1, True, True, True, None, 1.0, "Status response level", True),
     "min_angle_limit": RegisterSpec(9, 2, True, True, True, "counts", 1.0, "Minimum position limit"),
     "max_angle_limit": RegisterSpec(11, 2, True, True, True, "counts", 1.0, "Maximum position limit"),
@@ -182,12 +175,11 @@ REGISTER_SPECS: Dict[str, RegisterSpec] = {
         "sign_magnitude_15",
     ),
     "mode": RegisterSpec(33, 1, True, True, True, None, 1.0, "Operating mode"),
-    "protection_torque": RegisterSpec(34, 1, True, True, True, "fraction", 0.01, "Torque retained during overload protection", True),
-    "protection_time": RegisterSpec(35, 1, True, True, True, "s", 0.01, "Overload protection delay", True),
-    "overload_torque": RegisterSpec(36, 1, True, True, True, "fraction", 0.01, "Overload threshold", True),
+    "current_p": RegisterSpec(34, 1, True, True, True, None, 1.0, "Current-loop proportional coefficient", True),
+    "current_i": RegisterSpec(35, 1, True, True, True, None, 1.0, "Current-loop integral coefficient", True),
     "speed_p": RegisterSpec(37, 1, True, True, True, None, 1.0, "Speed-loop proportional coefficient", True),
     "overcurrent_time": RegisterSpec(38, 1, True, True, True, "s", 0.01, "Over-current protection delay", True),
-    "speed_i": RegisterSpec(39, 1, True, True, True, None, 0.1, "Speed-loop integral coefficient", True),
+    "speed_i": RegisterSpec(39, 1, True, True, True, None, 1.0, "Speed-loop integral coefficient", True),
     "torque_enable": RegisterSpec(40, 1, True, True, False, None, 1.0, "Torque output enable"),
     "acceleration": RegisterSpec(41, 1, True, True, False, "raw", 1.0, "Goal acceleration"),
     "goal_position": RegisterSpec(
@@ -262,7 +254,7 @@ REGISTER_SPECS: Dict[str, RegisterSpec] = {
         0.001,
         "Motor drive/load feedback",
         False,
-        "sign_magnitude_15",
+        "sign_magnitude_10",
     ),
     "present_voltage": RegisterSpec(62, 1, True, False, False, "V", 0.1, "Input voltage"),
     "present_temperature": RegisterSpec(63, 1, True, False, False, "degC", 1.0, "Internal temperature"),
@@ -279,6 +271,7 @@ REGISTER_SPECS: Dict[str, RegisterSpec] = {
         0.0065,
         "Motor current; 6.5 mA/raw follows the common magnetic-family table",
         True,
+        "sign_magnitude_15",
     ),
 }
 
@@ -296,6 +289,7 @@ POSITION_COUNT_TO_DEG = 360.0 / POSITION_COUNTS_PER_REVOLUTION
 # shaft torque measurement and does not compensate for no-load current,
 # gearbox losses, temperature, or controller dynamics.
 HLS3950M_TORQUE_CONSTANT_KG_CM_PER_A = 20.8
+HLS3915M_TORQUE_CONSTANT_KG_CM_PER_A = 9.3
 KG_CM_TO_NM = 0.0980665
 
 # ReadPos() returns a sign-magnitude value with bit 15 removed.  In the

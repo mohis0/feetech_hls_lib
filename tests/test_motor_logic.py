@@ -54,7 +54,7 @@ class FakePacket:
         # Runtime block 56..70.
         self._write_sign_magnitude(56, 100)
         self._write_sign_magnitude(58, 60)
-        self._write_sign_magnitude(60, -250)
+        self.memory[60:62] = ((1 << 10) | 250).to_bytes(2, "little")
         self.memory[62] = 120
         self.memory[63] = 32
         self.memory[64] = 0
@@ -154,8 +154,8 @@ def test_status_and_torque_estimate(fake_motor):
     assert status.load_signed == -250
     assert status.voltage_v == pytest.approx(12.0)
     assert status.current_a == pytest.approx(0.65)
-    assert status.estimated_torque_kg_cm == pytest.approx(13.52)
-    assert status.estimated_torque_nm == pytest.approx(13.52 * 0.0980665)
+    assert status.estimated_torque_kg_cm == pytest.approx(6.045)
+    assert status.estimated_torque_nm == pytest.approx(6.045 * 0.0980665)
     assert StatusFlag.OVERCURRENT in status.status_flags
 
 
@@ -213,3 +213,29 @@ def test_configuration_snapshot_json(fake_motor, tmp_path: Path):
     text = path.read_text(encoding="utf-8")
     assert '"present_voltage"' in text
     assert '"decoded"' in text
+
+
+def test_signed_current_and_load_registers(fake_motor):
+    motor, packet = fake_motor
+    packet.memory[69:71] = (0x8000 | 100).to_bytes(2, "little")
+    assert motor.read_current() == pytest.approx(-0.65)
+    assert motor.read_status().current_a == pytest.approx(-0.65)
+    assert motor.read_named_register("present_current").decoded == -100
+    assert motor.read_named_register("present_load").decoded == -250
+
+
+def test_return_delay_cannot_write_secondary_id(fake_motor):
+    motor, packet = fake_motor
+    with pytest.raises(motor_module.ConfigurationError):
+        motor.set_return_delay_us(100)
+    assert packet.memory[7] == 0
+
+
+def test_eeprom_unlock_requires_torque_off(fake_motor):
+    motor, packet = fake_motor
+    with pytest.raises(motor_module.ConfigurationError):
+        motor.unlock_eeprom()
+    assert packet.memory[55] == 1
+    packet.memory[40] = 0
+    motor.unlock_eeprom()
+    assert packet.memory[55] == 0

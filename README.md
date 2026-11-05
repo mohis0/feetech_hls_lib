@@ -1,16 +1,16 @@
 # Feetech HLS Raspberry Pi Library
 
-A focused Python wrapper for a Feetech HLS-series serial servo—developed around the **HLS3950M**—connected to a Raspberry Pi UART with this half-duplex circuit:
+A focused Python wrapper for a Feetech HLS-series serial servo—developed around the **HL-3915-C001**—connected to a Raspberry Pi UART with this half-duplex circuit:
 
 - Raspberry Pi **RX is connected continuously** to the servo DATA line.
-- Raspberry Pi **TX is connected or disconnected** through a CD4051 analog multiplexer.
+- Raspberry Pi **TX connects through a 1 kOhm resistor** to servo DATA.
 - Because RX always monitors the bus, every transmitted packet is received as a local echo. The library removes that echo before the Feetech SDK parses the servo response.
 
-The package builds on the `scservo_sdk` bundled by Vassar Robotics' Feetech SDK and adds the Raspberry Pi/CD4051 transport, safe cleanup, continuous encoder unwrapping, typed status data, register helpers, configuration methods, filtering, and examples.
+The package builds on the `scservo_sdk` bundled by Vassar Robotics' Feetech SDK and adds the Raspberry Pi UART transport, safe cleanup, continuous encoder unwrapping, typed status data, register helpers, configuration methods, filtering, and examples.
 
 ## Features
 
-- CD4051-controlled half-duplex TTL transport for Raspberry Pi 5.
+- Resistor-connected half-duplex TTL transport for Raspberry Pi 5.
 - Continuous RX with automatic TX-echo removal.
 - Wheel/speed mode, position mode, torque enable/disable, stop-on-close, and constant-current/torque target helpers.
 - Non-wrapping software encoder values:
@@ -19,67 +19,37 @@ The package builds on the `scservo_sdk` bundled by Vassar Robotics' Feetech SDK 
 - Position and speed in one read transaction.
 - A coherent status-block read containing position, speed, load, voltage, temperature, moving flag, error flags, and current.
 - `read_snapshot()` returns that status block together with the updated non-wrapping encoder from the same UART transaction.
-- Current-based HLS3950M torque estimates in kg.cm and N.m, clearly separated from direct measurements.
+- Current-based HL-3915-C001 torque estimates in kg.cm and N.m, clearly separated from direct measurements.
 - Exponential voltage smoothing, including the requested `old * 0.95 + new * 0.05` filter.
 - Raw and named register reads/writes.
-- Persistent configuration helpers for ID, baud rate, response level, return delay, angle limits, voltage/temperature limits, dead zones, and PID values.
+- Persistent configuration helpers for ID, baud rate, response level, angle limits, voltage/temperature limits, dead zones, and PID values.
 - JSON configuration backups plus ID scanning and baud-rate recovery helpers.
 - Context-manager cleanup and repeated zero-speed packets when the program exits or receives `Ctrl+C`.
+
+Exact model and firmware register behavior requires verification. Disable torque before persistent EEPROM changes.
 
 ## Hardware wiring
 
 ### Servo power
 
-Do not power the HLS3950M from the Raspberry Pi.
+Do not power the servo from the Raspberry Pi.
 
 ```text
 External regulated 9–12.6 V  ---- Servo V+
 External supply GND           ---- Servo GND
-Raspberry Pi GND              ---- Servo GND / supply GND / CD4051 GND
+Raspberry Pi GND              ---- Servo GND / supply GND
 ```
 
-Use a supply with enough transient current. The HLS3950M product specification lists a 2.4 A stall current at 12 V, so a supply with sensible margin is recommended.
+Use a supply with enough transient current. The HL-3915-C001 specification lists a 1.5 A stall current at 12 V, so a supply with sensible margin is recommended.
 
-### UART and CD4051
-
-This package assumes the working wiring established during testing:
+### UART connection
 
 ```text
-Raspberry Pi GPIO15 / RX ------------------------ Servo DATA
-
-Raspberry Pi GPIO14 / TX ---- CD4051 selected channel ----+
-                                                           |
-CD4051 COM ------------------------------------------------+---- Servo DATA
-
-CD4051 unused channel ------------------------------------------ not connected
-Raspberry Pi GPIO23 ---------------- CD4051 A/select
+Raspberry Pi GPIO15 / RX ---------------- Servo DATA
+Raspberry Pi GPIO14 / TX ---- 1 kOhm ---- Servo DATA
 ```
 
-For the current circuit:
-
-```text
-GPIO23 HIGH -> TX connected to servo DATA
-GPIO23 LOW  -> TX disconnected from servo DATA
-```
-
-The levels are configurable in `HLSMotor` if your CD4051 channels are reversed.
-
-A typical CD4051BE DIP assignment is:
-
-| CD4051BE pin | Function | Connection |
-|---:|---|---|
-| 16 | VDD | 3.3 V |
-| 8 | VSS | GND |
-| 7 | VEE | GND |
-| 6 | INH | GND |
-| 11 | A | Raspberry Pi GPIO23 |
-| 10 | B | GND |
-| 9 | C | GND |
-| 3 | COM | Servo DATA |
-| one selected channel | TX path | Raspberry Pi GPIO14/TX |
-| one alternate channel | TX-off path | Leave unconnected |
-
-RX does **not** pass through the multiplexer. It remains connected to DATA at all times.
+RX monitors the bus continuously; the library discards the transmitted echo. Confirm the servo DATA voltage is safe for 3.3 V GPIO. No TX direction GPIO is used.
 
 ## Raspberry Pi UART
 
@@ -89,7 +59,6 @@ The code defaults to:
 UART device: /dev/ttyAMA0
 Baud rate:   38400
 Servo ID:    1
-Mux GPIO:    23
 ```
 
 On the tested Raspberry Pi 5 setup, GPIO14 and GPIO15 were mapped to `TXD0` and `RXD0`, while `/dev/serial0` pointed elsewhere. Use `/dev/ttyAMA0` when that is the device attached to GPIO14/15.
@@ -107,7 +76,7 @@ Log out and back in after changing group membership.
 Inside your virtual environment:
 
 ```bash
-pip install vassar-feetech-servo-sdk pyserial lgpio
+pip install vassar-feetech-servo-sdk pyserial
 ```
 
 Install this wrapper in editable mode:
@@ -132,9 +101,6 @@ with HLSMotor(
     servo_id=1,
     port="/dev/ttyAMA0",
     baudrate=38_400,
-    mux_gpio=23,
-    tx_connected_level=1,
-    tx_disconnected_level=0,
 ) as motor:
     print("Model:", motor.ping())
     print("Voltage:", motor.read_voltage(), "V")
@@ -216,7 +182,7 @@ finally:
 
 A direct subtraction can interpret those transitions as enormous jumps. The library tracks the 32,768-count sign-magnitude cycle and, in `direction_policy="command"`, uses the sign of the last wheel-speed command to choose a monotonic movement direction. Python integers then accumulate the corrected deltas without overflow.
 
-The default `encoder_max_step_counts=8192` rejects implausibly large single-sample changes instead of adding them to the total. At the measured ~125 Hz read rate and the HLS3950M's physical speed, a valid step should be far below this limit.
+The default `encoder_max_step_counts=8192` rejects implausibly large single-sample changes instead of adding them to the total. At the measured ~125 Hz read rate and the HL-3915-C001's physical speed, a valid step should be far below this limit.
 
 Available direction policies:
 
@@ -246,7 +212,7 @@ motor.set_wheel_speed(
 
 - Positive and negative values select opposite directions.
 - The official HLS SDK wheel example uses approximately `0.732 RPM` per raw speed unit.
-- A raw command near `100` is already around the HLS3950M's rated no-load speed.
+- A raw command near `137` is already around the HL-3915-C001's rated no-load speed.
 - Very large commands such as `1000` saturate the controller and can increase whine, heat, vibration, and gearbox noise. The library emits a warning when the requested RPM is far above `rated_no_load_rpm`.
 
 ### RPM helper
@@ -333,7 +299,7 @@ print(status.status_flags)
 
 `present_load` is the controller's drive/load feedback, described in the magnetic-family control table as motor-drive duty feedback. It is **not a calibrated torque sensor**. The library therefore exposes raw load, scaled load fraction, current, and goal torque separately instead of claiming a physical N·m torque measurement.
 
-The HLS3950M product specification lists a motor torque constant of `20.8 kg.cm/A`. By default, the library multiplies measured current by that value and exposes the result as `estimated_torque_kg_cm` and `estimated_torque_nm`. This remains an estimate: it includes no-load current and does not compensate for gearbox losses, temperature, controller transients, or mechanical efficiency. Disable it with:
+The HL-3915-C001 product specification lists a motor torque constant of `9.3 kg.cm/A`. By default, the library multiplies measured current by that value and exposes the result as `estimated_torque_kg_cm` and `estimated_torque_nm`. This remains an estimate: it includes no-load current and does not compensate for gearbox losses, temperature, controller transients, or mechanical efficiency. Disable it with:
 
 ```python
 motor = HLSMotor(torque_constant_kg_cm_per_a=None)
@@ -452,7 +418,7 @@ The `skip_errors=True` default is intentional. Feetech's HLS SDK confirms the co
 Back up readable registers before persistent changes:
 
 ```python
-path = motor.backup_configuration("hls3950m_backup.json")
+path = motor.backup_configuration("hls3915m_backup.json")
 print(path)
 ```
 
@@ -521,7 +487,7 @@ After persistent communication changes, a full servo power cycle is still a sens
 
 ```python
 motor.set_response_level(1)
-motor.set_return_delay_us(100)
+ # Address 7 is secondary ID; response delay is not configured here.
 motor.set_angle_limits(0, 4095)
 motor.set_voltage_limits(9.0, 12.6)
 motor.set_temperature_limit(70)
@@ -601,7 +567,7 @@ The wrapper handles response level `0` correctly: READ/PING transactions still w
 - `detect_baudrate()`
 - `set_id_and_baudrate()`
 - `set_response_level()`
-- `set_return_delay_us()`
+- `set_return_delay_us()` is disabled: HLS address 7 is the secondary ID.
 - `set_angle_limits()`
 - `set_voltage_limits()`
 - `set_temperature_limit()`
@@ -649,7 +615,7 @@ motor.set_wheel_speed(
 )
 ```
 
-Then increase gradually. Commands around raw `100` are already near the HLS3950M's rated no-load RPM. Very high raw commands can saturate the speed loop.
+Then increase gradually. Commands around raw `137` are already near the HL-3915-C001's rated no-load RPM. Very high raw commands can saturate the speed loop.
 
 Other software measures:
 
@@ -663,8 +629,8 @@ Mechanical gearbox noise, mounting resonance, supply ripple, and load alignment 
 ## Safety and limitations
 
 - Lift the wheel or secure the mechanism during first tests.
-- The HLS3950M can produce high torque even at low command values.
-- Always use a common ground between Pi, CD4051, servo, and external supply.
+- The HL-3915-C001 can produce high torque even at low command values.
+- Always use a common ground between Pi, servo, and external supply.
 - Confirm that servo DATA remains within the Raspberry Pi's 3.3 V GPIO range.
 - Do not put multiple servos on the bus when changing IDs with uncertain existing IDs.
 - Persistent register writes can make communication difficult to recover. Keep a record of the current ID, baud rate, and configuration dump.
@@ -694,4 +660,4 @@ The tests include the observed boundary transitions:
 - HLS handler/register constants: https://raw.githubusercontent.com/vassar-robotics/feetech-servo-sdk/main/scservo_sdk/hls.py
 - Protocol packet handler: https://raw.githubusercontent.com/vassar-robotics/feetech-servo-sdk/main/scservo_sdk/protocol_packet_handler.py
 - Official magnetic-encoder protocol manual: https://www.feetechrc.com/Data/feetechrc/upload/file/20240702/%E8%88%B5%E6%9C%BA%E5%8D%8F%E8%AE%AE%E6%89%8B%E5%86%8C-%E7%A3%81%E7%BC%96%E7%A0%81%E7%89%88%E6%9C%AC.pdf
-- HLS3950M product page/specification: https://www.feetechrc.com/563788.html
+- HL-3915-C001 product page/specification: https://www.feetechrc.com/563788.html

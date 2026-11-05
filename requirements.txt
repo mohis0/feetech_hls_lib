@@ -1,3 +1,2 @@
 vassar-feetech-servo-sdk>=1.4.0
 pyserial>=3.5
-lgpio>=0.2.2.0

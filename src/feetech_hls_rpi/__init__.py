@@ -1,4 +1,4 @@
-"""Raspberry Pi library for Feetech HLS servos with CD4051-switched TX."""
+"""Raspberry Pi library for Feetech HLS servos with resistor-connected TX."""
 
 from .constants import (
     BAUD_CODE_TO_RATE,

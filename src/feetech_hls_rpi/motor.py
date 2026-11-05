@@ -1,4 +1,4 @@
-"""High-level HLS servo controller for Raspberry Pi + CD4051."""
+"""High-level HLS servo controller for Raspberry Pi UART."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from ._compat import COMM_SUCCESS, hls, require_hardware_dependencies
 from .constants import (
     BAUD_CODE_TO_RATE,
     CURRENT_RAW_TO_AMP,
-    HLS3950M_TORQUE_CONSTANT_KG_CM_PER_A,
+    HLS3915M_TORQUE_CONSTANT_KG_CM_PER_A,
     KG_CM_TO_NM,
     MAX_SERVO_ID,
     MIN_SERVO_ID,
@@ -80,7 +80,7 @@ def _sign(value: int) -> int:
 class HLSMotor:
     """Control and monitor one Feetech HLS servo.
 
-    The class owns the UART, CD4051 GPIO, Feetech packet handler, incremental
+    The class owns the UART, Feetech packet handler, incremental
     encoder state, and voltage filter.  It is safe to use as a context manager;
     on exit it sends stop packets before closing the interface.
     """
@@ -104,9 +104,9 @@ class HLSMotor:
         stop_on_close: bool = True,
         disable_torque_on_close: bool = False,
         strict_servo_status: bool = False,
-        rated_no_load_rpm: Optional[float] = 75.0,
+        rated_no_load_rpm: Optional[float] = 100.0,
         torque_constant_kg_cm_per_a: Optional[float] = (
-            HLS3950M_TORQUE_CONSTANT_KG_CM_PER_A
+            HLS3915M_TORQUE_CONSTANT_KG_CM_PER_A
         ),
     ) -> None:
         require_hardware_dependencies()
@@ -329,6 +329,8 @@ class HLSMotor:
         raw = self.read_register(spec.address, spec.length)
         if spec.encoding == "sign_magnitude_15":
             decoded = decode_sign_magnitude(raw, 15)
+        elif spec.encoding == "sign_magnitude_10":
+            decoded = decode_sign_magnitude(raw, 10)
         elif spec.encoding == "unsigned":
             decoded = raw
         else:
@@ -521,11 +523,11 @@ class HLSMotor:
         load_register = _word_le(data[4], data[5])
         position_sdk = decode_sign_magnitude(position_raw, 15)
         speed_raw = decode_sign_magnitude(speed_register, 15)
-        load_signed = decode_sign_magnitude(load_register, 15)
+        load_signed = decode_sign_magnitude(load_register, 10)
         status_byte = data[9]
         response_status = self._last_servo_error
         current_raw = _word_le(data[13], data[14])
-        current_a = current_raw * CURRENT_RAW_TO_AMP
+        current_a = decode_sign_magnitude(current_raw, 15) * CURRENT_RAW_TO_AMP
         estimated_torque_kg_cm = self.estimate_torque_kg_cm(current_a=current_a)
         estimated_torque_nm = self.estimate_torque_nm(current_a=current_a)
 
@@ -600,7 +602,7 @@ class HLSMotor:
 
     def read_load_raw(self) -> int:
         raw = self.read_register(Register.PRESENT_LOAD, 2)
-        return decode_sign_magnitude(raw, 15)
+        return decode_sign_magnitude(raw, 10)
 
     def read_load_fraction(self) -> float:
         """Return absolute drive/load feedback scaled by 0.001.
@@ -630,12 +632,12 @@ class HLSMotor:
         return self.read_register(Register.PRESENT_CURRENT, 2)
 
     def read_current(self) -> float:
-        return self.read_current_raw() * CURRENT_RAW_TO_AMP
+        return decode_sign_magnitude(self.read_current_raw(), 15) * CURRENT_RAW_TO_AMP
 
     def estimate_torque_kg_cm(self, *, current_a: Optional[float] = None) -> Optional[float]:
         """Estimate output torque magnitude from current and the configured Kt.
 
-        The HLS3950M product specification gives ``Kt = 20.8 kg.cm/A``.  This
+        The HL-3915-C001 specification gives ``Kt = 9.3 kg.cm/A``.  This
         method is an engineering estimate, not a direct torque-sensor reading;
         it does not remove no-load current or compensate gearbox losses,
         temperature, or controller dynamics.  Pass
@@ -1069,6 +1071,8 @@ class HLSMotor:
             return True
 
     def unlock_eeprom(self, *, expect_reply: Optional[bool] = None) -> None:
+        if self.read_register(Register.TORQUE_ENABLE, 1) != 0:
+            raise ConfigurationError("Disable torque before unlocking EEPROM; HLS may otherwise not save changes")
         if expect_reply is None:
             expect_reply = self._write_acknowledgements_enabled()
         self.write_register(Register.LOCK, 0, expect_reply=expect_reply)
@@ -1211,14 +1215,8 @@ class HLSMotor:
         self._response_level_cache = ResponseLevel(value)
 
     def set_return_delay_us(self, delay_us: int) -> int:
-        """Set response delay in 2-us units and return the applied delay."""
-
-        if not 0 <= int(delay_us) <= 508:
-            raise ValueError("delay_us must be in range 0..508")
-        raw = int(round(delay_us / 2.0))
-        with self.eeprom_unlocked():
-            self.write_register(Register.RETURN_DELAY, raw)
-        return raw * 2
+        """Reject this unsupported setting: HLS address 7 is secondary ID."""
+        raise ConfigurationError("HLS address 7 is secondary ID, not response delay")
 
     def set_angle_limits(self, minimum: int, maximum: int) -> None:
         if not 0 <= int(minimum) < int(maximum) <= 4095:

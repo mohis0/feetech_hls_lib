@@ -17,7 +17,7 @@ This wrapper separates registers into two confidence groups:
 | CW dead zone | 26 | 1 | R/W EEPROM | Counts. |
 | CCW dead zone | 27 | 1 | R/W EEPROM | Counts. |
 | Position offset | 31 | 2 | R/W EEPROM | Sign-magnitude position correction. |
-| Mode | 33 | 1 | R/W EEPROM | 0 position, 1 speed, 2 torque/current; mode 3 is firmware dependent. |
+| Mode | 33 | 1 | R/W EEPROM | 0 position, 1 speed, 2 torque/current; 3 open-loop PWM (firmware dependent). |
 | Torque enable | 40 | 1 | R/W SRAM | 0 off, 1 on. |
 | Acceleration | 41 | 1 | R/W SRAM | Raw acceleration. |
 | Goal position | 42 | 2 | R/W SRAM | Sign-magnitude counts. |
@@ -59,7 +59,7 @@ This wrapper separates registers into two confidence groups:
 | 8 | 64 | Registered-instruction flag |
 | 9 | 65 | Status bit field |
 | 10 | 66 | Moving flag |
-| 11–12 | 67–68 | Reserved/undefined |
+| 11–12 | 67–68 | Current target position |
 | 13–14 | 69–70 | Current |
 
 ## Status bits
@@ -70,7 +70,7 @@ This wrapper separates registers into two confidence groups:
 | 1 | 2 | Angle-sensor error |
 | 2 | 4 | Overheat |
 | 3 | 8 | Overcurrent |
-| 5 | 32 | Overload |
+
 
 ## Extended magnetic-family registers
 
@@ -78,7 +78,7 @@ The package exposes named entries for these because they are common in Feetech's
 
 | Name | Address | Bytes | Unit / notes |
 |---|---:|---:|---|
-| Return delay | 7 | 1 | 2 µs per raw unit. |
+| Secondary ID | 7 | 1 | Secondary write ID; model and firmware dependent. |
 | Response level | 8 | 1 | 0 read/ping only, 1 all instructions. |
 | Max temperature | 13 | 1 | °C. |
 | Max voltage | 14 | 1 | 0.1 V. |
@@ -92,12 +92,11 @@ The package exposes named entries for these because they are common in Feetech's
 | Integral limit | 25 | 1 | Controller-dependent. |
 | Protection current | 28 | 2 | Raw × 6.5 mA. |
 | Angular resolution | 30 | 1 | Multi-turn/resolution multiplier. |
-| Protection torque | 34 | 1 | Raw × 0.01. |
-| Protection time | 35 | 1 | Raw × 10 ms. |
-| Overload torque | 36 | 1 | Raw × 0.01. |
+| Current loop P / I | 34 / 35 | 1 each | Controller coefficients. |
+| Undefined | 36 | 1 | Do not write. |
 | Speed P | 37 | 1 | Speed-loop coefficient. |
 | Overcurrent time | 38 | 1 | Raw × 10 ms. |
-| Speed I | 39 | 1 | Common table uses raw × 0.1. |
+| Speed I | 39 | 1 | Raw coefficient. |
 | Torque limit | 48 | 2 | Runtime limit on common magnetic firmware. |
 | Registered instruction | 64 | 1 | REG_WRITE pending flag. |
 | Status | 65 | 1 | Protection/status bit field. |
@@ -106,13 +105,13 @@ The package exposes named entries for these because they are common in Feetech's
 
 ```python
 value = motor.read_register(address=69, length=2)
-current_a = value * 0.0065
+current_a = motor.read_current()  # signed 6.5 mA units
 ```
 
 ## Sign-magnitude decoding
 
-Position, speed, load, goal position, goal speed, goal torque, and position
-offset use bit 15 as a Feetech sign/direction flag. Named-register reads expose
+Position, speed, current, goal position, goal speed, goal current, and position
+offset use bit 15 as the sign flag. Load uses bit 10. Named-register reads expose
 both values:
 
 ```python
@@ -121,13 +120,13 @@ print(value.raw)      # original 16-bit register
 print(value.decoded)  # signed sign-magnitude value
 ```
 
-## Current-based HLS3950M torque estimate
+## Current-based HL-3915-C001 torque estimate
 
-The HLS3950M product specification gives a torque constant of
-`20.8 kg.cm/A`. The library can therefore report:
+The HL-3915-C001 product specification gives a torque constant of
+`9.3 kg.cm/A`. The library can therefore report:
 
 ```text
-estimated torque magnitude = measured current × 20.8 kg.cm/A
+estimated torque magnitude = absolute measured current × 9.3 kg.cm/A
 ```
 
 This is not a direct shaft-torque measurement. No-load current, gearbox loss,
@@ -148,3 +147,5 @@ snapshot = motor.dump_registers(skip_errors=True)
 for name, value in snapshot.values.items():
     print(name, value.raw)
 ```
+
+Disable torque before unlocking EEPROM for persistent changes. Confirm the exact model firmware table before writes.
