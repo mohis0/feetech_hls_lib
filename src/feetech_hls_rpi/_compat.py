@@ -23,12 +23,10 @@ except ImportError:  # pragma: no cover - exercised on non-Pi CI
 
 def require_hardware_dependencies() -> None:
     missing = []
-    if lgpio_module is None:
-        missing.append("lgpio")
     if hls is None:
         missing.append("vassar-feetech-servo-sdk (scservo_sdk)")
     if missing:
         raise MissingDependencyError(
             "Missing runtime dependencies: " + ", ".join(missing) + ". "
-            "Install with: pip install vassar-feetech-servo-sdk pyserial lgpio"
+            "Install with: pip install vassar-feetech-servo-sdk pyserial"
         )
